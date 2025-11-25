@@ -14,8 +14,8 @@ async function loadNTT() {
 
     // allocate memory in Wasm
     const mem = new Int16Array(kyber.memory.buffer);
-    const r_ptr = 0;
-    const z_ptr = 16;
+    const r_ptr = 2048;
+    const z_ptr = 2048 + 16;
 
     mem.set(r, r_ptr / 2);
     mem.set(zeta, z_ptr / 2);
@@ -23,5 +23,6 @@ async function loadNTT() {
     // Call SIMD NTT step
     kyber.ntt8(r_ptr, z_ptr);
 
-    console.log("Output:", mem.slice(0, 8));
+    console.log("Output:", mem.slice(r_ptr / 2, (r_ptr / 2) + 8));
 })();
+
