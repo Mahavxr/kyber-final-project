@@ -5,33 +5,66 @@ async function loadNTT() {
     return wasm.instance.exports;
 }
 
+// 1. Pure JavaScript version of the math (for comparison)
+function js_pointwise_mul(r, zeta) {
+    const Q = 3329;
+    const QINV = 62209;
+    
+    // We loop 8 times (Simulating what SIMD does in 1 step)
+    for (let i = 0; i < 8; i++) {
+        let a = r[i] * zeta[i];
+        
+        // Montgomery Reduction (The math logic from C)
+        let t = (a * QINV) & 0xFFFF;
+        let result = (a - t * Q) >> 16;
+        
+        r[i] = result; 
+    }
+}
+
 (async () => {
     const kyber = await loadNTT();
 
-    // 1. Define the data
-    const r = new Int16Array([10, 20, 30, 40, 50, 60, 70, 80]);
-    const zeta = new Int16Array([5, 5, 5, 5, 5, 5, 5, 5]);
+    // Setup Data
+    const r_data = new Int16Array([10, 20, 30, 40, 50, 60, 70, 80]);
+    const z_data = new Int16Array([5, 5, 5, 5, 5, 5, 5, 5]);
 
-    // 2. SAFE MEMORY LOCATIONS (Offset 2048 to avoid Stack overwrites)
-    // Note: JS uses "Index" (2 bytes each), Wasm uses "Bytes"
-    const r_byte_offset = 2048; 
-    const z_byte_offset = 2048 + 32; // slightly more space to be safe
-    
-    const r_index = r_byte_offset / 2;
-    const z_index = z_byte_offset / 2;
-
-    // 3. Write data to Wasm Memory
+    // Setup Wasm Memory (Safe Location 2048)
     const mem = new Int16Array(kyber.memory.buffer);
-    mem.set(r, r_index);
-    mem.set(zeta, z_index);
+    const r_ptr = 2048;
+    const z_ptr = 2048 + 32;
 
-    // DEBUG: Prove data is there BEFORE the run
-    console.log("DEBUG - Input at 2048:", mem.slice(r_index, r_index + 8));
+    // --- BENCHMARK CONFIGURATION ---
+    const ITERATIONS = 1_000_000; // Run 1 million times
+    console.log(`Starting Benchmark (${ITERATIONS} iterations)...`);
 
-    // 4. Run the C code (Pass BYTE offsets, not indexes)
-    kyber.ntt8(r_byte_offset, z_byte_offset);
+    // --- TEST 1: JavaScript Performance ---
+    const startJS = performance.now();
+    for (let i = 0; i < ITERATIONS; i++) {
+        js_pointwise_mul(r_data, z_data);
+    }
+    const endJS = performance.now();
+    const timeJS = endJS - startJS;
 
-    // 5. Read the result
-    // CRITICAL: We slice from r_index, NOT 0!
-    console.log("Output - Result at 2048:", mem.slice(r_index, r_index + 8));
+    // --- TEST 2: WebAssembly (SIMD) Performance ---
+    // Load data into Wasm memory once for the loop
+    mem.set(r_data, r_ptr / 2);
+    mem.set(z_data, z_ptr / 2);
+    
+    const startWasm = performance.now();
+    for (let i = 0; i < ITERATIONS; i++) {
+        kyber.ntt8(r_ptr, z_ptr);
+    }
+    const endWasm = performance.now();
+    const timeWasm = endWasm - startWasm;
+
+    // --- REPORT RESULTS ---
+    console.log("------------------------------------------------");
+    console.log(`JavaScript Time:       ${timeJS.toFixed(2)} ms`);
+    console.log(`WebAssembly/SIMD Time: ${timeWasm.toFixed(2)} ms`);
+    console.log("------------------------------------------------");
+    
+    const ratio = timeJS / timeWasm;
+    console.log(`🚀 Improvement Ratio:  ${ratio.toFixed(2)}x FASTER`);
+    console.log("------------------------------------------------");
 })();
